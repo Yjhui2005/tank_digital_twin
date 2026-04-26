@@ -1,7 +1,9 @@
+// 直接使用 CDN 地址，让浏览器能直接找到 Three.js 引擎
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
 import './style.css'
-import * as THREE from 'three'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
 // 基础场景
 const scene = new THREE.Scene()
@@ -91,7 +93,7 @@ setupMotionCaptureUI()
 
 // 加载场景
 const sceneLoader = new GLTFLoader()
-sceneLoader.load('/Terrain.glb', (gltf) => {
+sceneLoader.load('./Terrain.glb', (gltf) => {
   const terrain = gltf.scene
   scene.add(terrain)
   buildTerrainPhysics(terrain)
@@ -99,7 +101,7 @@ sceneLoader.load('/Terrain.glb', (gltf) => {
 
 // 加载坦克
 const tankLoader = new GLTFLoader()
-tankLoader.load('/tank.glb', (gltf) => {
+tankLoader.load('./tank.glb', (gltf) => {
   tank = gltf.scene
   tank.scale.set(5, 5, 5)
   tank.position.set(0, 0.75, 0)
