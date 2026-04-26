@@ -1,9 +1,9 @@
-// 直接使用 CDN 地址，让浏览器能直接找到 Three.js 引擎
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
-//import './style.css'
+// 这一行可以暂时删掉，避免样式加载报错
+// import './style.css'
 
 // 基础场景
 const scene = new THREE.Scene()
@@ -49,6 +49,12 @@ const tankControl = {
   cruiseSpeed: 12,
   keys: { KeyW: false, KeyA: false, KeyS: false, KeyD: false, KeyQ: false, KeyE: false }
 }
+const SENSITIVITY_PRESETS = {
+  low:  { deadZone: 0.05, steerGain: 2.2, throttleGain: 1.8, lerp: 0.55, speedScale: 0.75, motionDiff: 5,  minCount: 12 },
+  mid:  { deadZone: 0.08, steerGain: 1.6, throttleGain: 1.25, lerp: 0.45, speedScale: 0.6,  motionDiff: 6,  minCount: 18 },
+  high: { deadZone: 0.12, steerGain: 1.0, throttleGain: 0.8,  lerp: 0.30, speedScale: 0.4,  motionDiff: 8,  minCount: 28 }
+}
+
 const motionCapture = {
   enabled: false,
   stream: null,
@@ -59,7 +65,7 @@ const motionCapture = {
   throttle: 0,
   steer: 0,
   confidence: 0,
-  speedScale: 0.6
+  sensitivity: 'mid'
 }
 const vehicleState = {
   velocity: 0,
@@ -72,7 +78,7 @@ const vehicleState = {
   collision: false
 }
 
-const timer = new THREE.Timer()
+let lastTime = 0
 let hasCameraInitialized = false
 const tankGroundOffset = 0.8
 const tankCollisionRadius = 2.1
@@ -140,6 +146,15 @@ function setupMotionCaptureUI() {
     <div class="vision-title">YOYO白色鼠标动捕</div>
     <button id="vision-toggle" class="vision-btn">启用摄像头动捕</button>
     <div id="vision-state" class="vision-state">状态：未启用（识别白色鼠标）</div>
+    <div class="vision-sensitivity">
+      <span>灵敏度：</span>
+      <div class="vision-btns">
+        <button class="sens-btn" data-sens="low">低</button>
+        <button class="sens-btn sens-active" data-sens="mid">中</button>
+        <button class="sens-btn" data-sens="high">高</button>
+      </div>
+    </div>
+    <div class="vision-sens-hint" id="vision-sens-hint">当前：中灵敏度（适合日常使用）</div>
     <video id="vision-video" class="vision-video" autoplay muted playsinline></video>
   `
   document.body.appendChild(panel)
@@ -178,6 +193,25 @@ function setupMotionCaptureUI() {
       console.error('摄像头权限失败:', error)
       stateEl.textContent = '状态：摄像头权限失败'
     }
+  })
+
+  // 灵敏度档位切换
+  const hintEl = panel.querySelector('#vision-sens-hint')
+  const SENS_HINTS = {
+    low: '低灵敏度（防误触，适合复杂背景）',
+    mid: '中灵敏度（适合日常使用）',
+    high: '高灵敏度（快速响应，手稍微动一点就动）'
+  }
+
+  panel.querySelectorAll('.sens-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sens = btn.dataset.sens
+      motionCapture.sensitivity = sens
+      panel.querySelectorAll('.sens-btn').forEach(b => b.classList.remove('sens-active'))
+      btn.classList.add('sens-active')
+      hintEl.textContent = `当前：${SENS_HINTS[sens]}`
+      motionCapture.prevGray = null // 重置差分缓冲
+    })
   })
 }
 
@@ -234,7 +268,7 @@ function updateMotionCapture() {
       let isMoving = true
       if (motionCapture.prevGray) {
         const prev = motionCapture.prevGray[pixelId]
-        isMoving = Math.abs(gray - prev) > 6
+        isMoving = Math.abs(gray - prev) > preset.motionDiff
       }
 
       if (!isWhite || !isMoving) continue
@@ -249,7 +283,7 @@ function updateMotionCapture() {
   const sampledPixels = Math.ceil(canvas.width / step) * Math.ceil(canvas.height / step)
   motionCapture.confidence = count / sampledPixels
 
-  if (count < 18) {
+  if (count < preset.minCount) {
     motionCapture.throttle = 0
     motionCapture.steer = 0
     return
@@ -259,14 +293,14 @@ function updateMotionCapture() {
   const cy = sumY / count
   const nx = (cx / canvas.width) * 2 - 1
   const ny = (cy / canvas.height) * 2 - 1
-  const deadZone = 0.08
 
-  // 速度降低：动捕输入本身减弱
-  const steer = Math.abs(nx) > deadZone ? THREE.MathUtils.clamp(nx * 1.6, -1, 1) : 0
-  const throttle = Math.abs(ny) > deadZone ? THREE.MathUtils.clamp(-ny * 1.25, -1, 1) : 0
+  const preset = SENSITIVITY_PRESETS[motionCapture.sensitivity]
 
-  motionCapture.steer = THREE.MathUtils.lerp(motionCapture.steer, steer, 0.45)
-  motionCapture.throttle = THREE.MathUtils.lerp(motionCapture.throttle, throttle, 0.45)
+  const steer = Math.abs(nx) > preset.deadZone ? THREE.MathUtils.clamp(nx * preset.steerGain, -1, 1) : 0
+  const throttle = Math.abs(ny) > preset.deadZone ? THREE.MathUtils.clamp(-ny * preset.throttleGain, -1, 1) : 0
+
+  motionCapture.steer = THREE.MathUtils.lerp(motionCapture.steer, steer, preset.lerp)
+  motionCapture.throttle = THREE.MathUtils.lerp(motionCapture.throttle, throttle, preset.lerp)
 }
 
 function buildTerrainPhysics(terrainRoot) {
@@ -333,7 +367,8 @@ function updateTank(delta) {
   const keyThrottle = (tankControl.keys.KeyW ? 1 : 0) - (tankControl.keys.KeyS ? 1 : 0)
   const keySteer = (tankControl.keys.KeyA ? 1 : 0) - (tankControl.keys.KeyD ? 1 : 0)
   const useVision = motionCapture.enabled && motionCapture.confidence > 0.0015
-  let throttleInput = useVision ? motionCapture.throttle * motionCapture.speedScale : keyThrottle
+  const preset = SENSITIVITY_PRESETS[motionCapture.sensitivity]
+  let throttleInput = useVision ? motionCapture.throttle * preset.speedScale : keyThrottle
   let steerInput = useVision ? motionCapture.steer * 0.8 : keySteer
 
   // 纵向动力学：油门、刹车、空挡阻尼
@@ -456,10 +491,11 @@ function updateHUD(throttleInput, steerInput) {
 }
 
 // 主循环
-function animate() {
+function animate(time) {
   requestAnimationFrame(animate)
-  timer.update()
-  const delta = THREE.MathUtils.clamp(timer.getDelta() || 1 / 60, 1 / 240, 0.05)
+  const now = time || performance.now()
+  const delta = lastTime ? THREE.MathUtils.clamp((now - lastTime) / 1000, 1 / 240, 0.05) : 1 / 60
+  lastTime = now
   updateTank(delta)
   updateCameraFollow()
   controls.update()
